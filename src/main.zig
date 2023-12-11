@@ -1,5 +1,7 @@
 const std = @import("std");
 const SDL = @import("sdl2"); // Add this package by using sdk.getNativeModule
+const rand_gen = std.rand.DefaultPrng;
+
 const WIDTH = 650;
 const HEIGHT = 650;
 
@@ -32,27 +34,66 @@ const Lines = struct {
             item.a = 255;
         }
 
-        for (&self.values, 0..) |*item, i| {
-            item.* = @intCast(i);
+        var rnd = rand_gen.init(0);
+
+        for (&self.values) |*item| {
+            var sum_random_number = rnd.random().int(i32);
+            if (sum_random_number < 0) {
+                sum_random_number *= -1;
+            }
+            const range: i32 = 101;
+            const scaled = @mod(sum_random_number, range);
+            item.* = scaled;
         }
 
         const rect_width = WIDTH / 100;
-        const index: i32 = @intFromFloat((WIDTH - rect_width * 100) * 0.5);
+        var index: i32 = @intFromFloat((WIDTH - rect_width * 100) * 0.5);
         for (&self.rects, 0..) |*item, i| {
             item.x = index;
-            item.y = 4 * 16;
+            item.y = 0;
             item.w = rect_width - 1;
-            item.h = self.values[i] + (4 * 16);
+            item.h = HEIGHT - (self.values[i] + 4 * 16);
+            index += rect_width;
         }
     }
 
-    pub fn swap(self: Self, min_index: usize, idx: usize) void {
+    pub fn print(self: Self) void {
+        for (self.values) |item| {
+            std.debug.print("value: {}\n", .{item});
+        }
+
+        for (self.rects) |rect| {
+            std.debug.print("{}\n", .{rect});
+        }
+
+        for (self.colors) |color| {
+            std.debug.print("{}\n", .{color});
+        }
+    }
+
+    pub fn swap(self: *Self, min_index: usize, idx: usize) void {
         var temp = self.values[min_index];
         self.values[min_index] = self.values[idx];
         self.values[idx] = temp;
         var temp_rect = self.rects[min_index];
         self.rects[min_index] = self.rects[idx];
         self.rects[idx] = temp_rect;
+    }
+
+    pub fn selectionSort(self: *Self, renderer: Renderer) void {
+        for (self.values, 0..) |_, i| {
+            var min_index = i;
+            var j = i + 1;
+
+            while (j < self.size) {
+                if (self.values[j] < self.values[min_index]) {
+                    min_index = j;
+                }
+                j += 1;
+            }
+            self.swap(min_index, i);
+            renderer.render(self, min_index, i);
+        }
     }
 };
 
@@ -66,23 +107,54 @@ const Renderer = struct {
             "Visualizer",
             SDL.SDL_WINDOWPOS_CENTERED,
             SDL.SDL_WINDOWPOS_CENTERED,
-            640,
-            480,
-            SDL.SDL_WINDOW_SHOWN,
+            WIDTH,
+            HEIGHT,
+            SDL.SDL_WINDOW_SHOWN | SDL.SDL_WINDOW_RESIZABLE,
         ) orelse sdlPanic();
         const renderer = SDL.SDL_CreateRenderer(window, -1, SDL.SDL_RENDERER_ACCELERATED) orelse sdlPanic();
         return Self{ .renderer = renderer, .window = window };
     }
-    pub fn render(self: Self, lines: Lines) void {
+    pub fn init_render(self: Self, lines: Lines) void {
+        _ = SDL.SDL_SetRenderDrawColor(self.renderer, 44, 44, 44, 255);
+
+        _ = SDL.SDL_RenderClear(self.renderer);
         for (lines.colors, 0..) |item, i| {
             _ = SDL.SDL_SetRenderDrawColor(self.renderer, item.r, item.g, item.b, item.a);
             _ = SDL.SDL_RenderFillRect(self.renderer, &lines.rects[i]);
         }
+        _ = SDL.SDL_RenderPresent(self.renderer);
     }
+
     pub fn deinit(self: Self) void {
-        SDL.SDL_Quit();
         SDL.SDL_DestroyWindow(self.window);
         SDL.SDL_DestroyRenderer(self.renderer);
+        SDL.SDL_Quit();
+    }
+
+    pub fn render(self: Self, lines: *Lines, red: usize, blue: usize) void {
+        _ = SDL.SDL_SetRenderDrawColor(self.renderer, 44, 44, 44, 255);
+        _ = SDL.SDL_RenderClear(self.renderer);
+        self.draw_state(lines, red, blue);
+        _ = SDL.SDL_RenderPresent(self.renderer);
+        SDL.SDL_Delay(50);
+    }
+
+    pub fn draw_state(self: Self, lines: *Lines, red: usize, blue: usize) void {
+        const rect_width = WIDTH / 100;
+        var index: i32 = @intFromFloat((WIDTH - rect_width * 100) * 0.5);
+        for (0..100) |i| {
+            if (i == red) {
+                _ = SDL.SDL_SetRenderDrawColor(self.renderer, 255, 0, 0, 255);
+            } else if (i == blue) {
+                _ = SDL.SDL_SetRenderDrawColor(self.renderer, 0, 0, 255, 255);
+            } else {
+                _ = SDL.SDL_SetRenderDrawColor(self.renderer, 255, 255, 255, 255);
+            }
+            lines.rects[i].x = index;
+            lines.rects[i].h = lines.values[i] + (4 * 16);
+            _ = SDL.SDL_RenderFillRect(self.renderer, &lines.*.rects[i]);
+            index += rect_width;
+        }
     }
 };
 
@@ -93,17 +165,27 @@ pub fn main() !void {
 
     var lines = Lines.init();
     lines.randomize();
+    //lines.print();
     var renderer = Renderer.init();
     defer renderer.deinit();
+
+    var x: c_int = 0;
+    var y: c_int = 0;
 
     mainLoop: while (true) {
         var ev: SDL.SDL_Event = undefined;
         while (SDL.SDL_PollEvent(&ev) != 0) {
             if (ev.type == SDL.SDL_QUIT)
                 break :mainLoop;
+            if (ev.type == SDL.SDL_MOUSEMOTION) {
+                _ = SDL.SDL_GetGlobalMouseState(&x, &y);
+                // std.debug.print("x: {}, y:{}\n", .{ x, y });
+            }
+            if (ev.type == SDL.SDL_KEYDOWN) {
+                lines.selectionSort(renderer);
+            }
 
-            SDL.SDL_Delay(5);
-            renderer.render(lines);
+            renderer.init_render(lines);
         }
     }
 }
