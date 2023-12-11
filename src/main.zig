@@ -1,24 +1,39 @@
 const std = @import("std");
+const SDL = @import("sdl2"); // Add this package by using sdk.getNativeModule
 
 pub fn main() !void {
-    // Prints to stderr (it's a shortcut based on `std.io.getStdErr()`)
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    if (SDL.SDL_Init(SDL.SDL_INIT_VIDEO | SDL.SDL_INIT_EVENTS | SDL.SDL_INIT_AUDIO) < 0)
+        sdlPanic();
+    defer SDL.SDL_Quit();
 
-    // stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+    var window = SDL.SDL_CreateWindow(
+        "SDL2 Native Demo",
+        SDL.SDL_WINDOWPOS_CENTERED,
+        SDL.SDL_WINDOWPOS_CENTERED,
+        640,
+        480,
+        SDL.SDL_WINDOW_SHOWN,
+    ) orelse sdlPanic();
+    defer _ = SDL.SDL_DestroyWindow(window);
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+    var renderer = SDL.SDL_CreateRenderer(window, -1, SDL.SDL_RENDERER_ACCELERATED) orelse sdlPanic();
+    defer _ = SDL.SDL_DestroyRenderer(renderer);
 
-    try bw.flush(); // don't forget to flush!
+    mainLoop: while (true) {
+        var ev: SDL.SDL_Event = undefined;
+        while (SDL.SDL_PollEvent(&ev) != 0) {
+            if (ev.type == SDL.SDL_QUIT)
+                break :mainLoop;
+        }
+
+        _ = SDL.SDL_SetRenderDrawColor(renderer, 0xF7, 0xA4, 0x1D, 0xFF);
+        _ = SDL.SDL_RenderClear(renderer);
+
+        SDL.SDL_RenderPresent(renderer);
+    }
 }
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit(); // try commenting this out and see if zig detects the memory leak!
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+fn sdlPanic() noreturn {
+    const str = @as(?[*:0]const u8, SDL.SDL_GetError()) orelse "unknown error";
+    @panic(std.mem.sliceTo(str, 0));
 }
